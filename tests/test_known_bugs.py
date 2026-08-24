@@ -16,7 +16,12 @@ from http import HTTPStatus
 
 import pytest
 
-from api.constants import TITLE_MAX_LENGTH, TOKEN_TTL_MS, Errors
+from api.constants import (
+    MEASURED_TOKEN_TTL_SEC,
+    TITLE_MAX_LENGTH,
+    TOKEN_TTL_MS,
+    Errors,
+)
 from tests.assertions import assert_created, assert_error, assert_status
 from tests.factories import OMIT, favorite, random_title
 
@@ -44,11 +49,32 @@ def test_title_of_1000_characters_is_rejected(favorites_api, token):
     reason="BUG-2: токен продолжает работать дольше заявленных 2000 мс "
            "(фактически около 2700 мс)",
 )
-def test_token_expires_after_documented_ttl(favorites_api, token):
-    """Через 2000 мс токен должен быть недействителен."""
-    time.sleep(TOKEN_TTL_MS / 1000 + 0.1)
+def test_token_expires_after_documented_ttl(favorites_api, auth_api):
+    """Через 2000 мс токен должен быть недействителен.
 
+    Время засекается вручную, а не берётся из фикстуры: на медленном канале
+    запрос может доехать до сервиса позже фактического времени жизни токена,
+    и тогда ответ 401 не доказывает, что дефекта нет. Такой прогон
+    помечается как пропущенный.
+    """
+    issued = auth_api.create_token()
+    assert issued.status_code == HTTPStatus.OK
+    token = issued.cookies.get("token")
+    started = time.monotonic()
+
+    time.sleep(TOKEN_TTL_MS / 1000 + 0.1)
     response = favorites_api.create(favorite(), token=token)
+    elapsed = time.monotonic() - started
+
+    if (
+        response.status_code == HTTPStatus.UNAUTHORIZED
+        and elapsed > MEASURED_TOKEN_TTL_SEC
+    ):
+        pytest.skip(
+            f"Ответ получен через {elapsed:.2f} с после выдачи токена, это больше "
+            f"фактического времени жизни ({MEASURED_TOKEN_TTL_SEC} с). "
+            f"Проверка неинформативна из-за задержки сети."
+        )
 
     assert_error(response, HTTPStatus.UNAUTHORIZED, Errors.TOKEN_INVALID)
 

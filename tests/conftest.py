@@ -1,6 +1,7 @@
 """Фикстуры и настройки запуска."""
 
 from http import HTTPStatus
+from typing import Callable
 
 import pytest
 
@@ -39,18 +40,31 @@ def favorites_api(base_url: str, http: Http) -> FavoritesApi:
 
 
 @pytest.fixture
-def token(auth_api: AuthApi) -> str:
+def new_token(auth_api: AuthApi) -> Callable[[], str]:
+    """Фабрика токенов: выдаёт новый токен на каждый вызов.
+
+    Нужна там, где тест делает несколько запросов подряд и одного токена
+    может не хватить из-за его короткого времени жизни.
+    """
+
+    def create() -> str:
+        response = auth_api.create_token()
+        assert response.status_code == HTTPStatus.OK, (
+            f"Не удалось получить токен: {response.status_code} {response.text[:200]}"
+        )
+        value = response.cookies.get("token")
+        assert value, "В ответе на запрос токена отсутствует cookie 'token'"
+        return value
+
+    return create
+
+
+@pytest.fixture
+def token(new_token: Callable[[], str]) -> str:
     """Свежий сессионный токен на каждый тест.
 
     Скоуп именно function, а не session: токен живёт около двух секунд,
     и общий на всю сессию токен протух бы уже на втором тесте, уронив
     весь прогон в 401.
     """
-    response = auth_api.create_token()
-    assert response.status_code == HTTPStatus.OK, (
-        f"Не удалось получить токен: {response.status_code} {response.text[:200]}"
-    )
-
-    value = response.cookies.get("token")
-    assert value, "В ответе на запрос токена отсутствует cookie 'token'"
-    return value
+    return new_token()

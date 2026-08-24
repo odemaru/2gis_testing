@@ -89,11 +89,15 @@ def test_create_favorite_with_boundary_coordinates(favorites_api, token, lat, lo
     assert_created(response, payload)
 
 
-def test_id_increases_monotonically(favorites_api, token):
-    """Идентификатор нового места монотонно возрастает."""
+def test_id_increases_monotonically(favorites_api, new_token):
+    """Идентификатор нового места монотонно возрастает.
+
+    Токен берётся свежий на каждое создание: три запроса подряд могут не
+    уложиться в его время жизни на медленном канале.
+    """
     ids = []
     for _ in range(3):
-        response = favorites_api.create(favorite(), token=token)
+        response = favorites_api.create(favorite(), token=new_token())
         assert_status(response, HTTPStatus.OK)
         ids.append(response.json()["id"])
 
